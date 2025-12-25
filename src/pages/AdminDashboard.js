@@ -1,0 +1,980 @@
+// frontend/src/pages/AdminDashboard.js - COMPLETE FIXED VERSION
+import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
+import axios from 'axios';
+import {
+  Container,
+  Paper,
+  Typography,
+  Box,
+  Button,
+  Grid,
+  Card,
+  CardContent,
+  LinearProgress,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
+  TextField,
+  MenuItem,
+  Alert,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  CircularProgress,
+  Chip,
+  Select,
+  FormControl,
+  InputLabel
+} from '@mui/material';
+import { Upload, BarChart, People, Quiz, Refresh, Download, FilterList } from '@mui/icons-material';
+
+// Use environment variable for API URL
+const API_URL = process.env.REACT_APP_API_URL || 'https://nexus-quiz-backend.onrender.com/api';
+
+function AdminDashboard() {
+  const navigate = useNavigate();
+  const [selectedEvent, setSelectedEvent] = useState('All');
+  const [csvFile, setCsvFile] = useState(null);
+  const [uploading, setUploading] = useState(false);
+  const [stats, setStats] = useState({
+    totalParticipants: 0,
+    quizTaken: 0,
+    averageScore: 0,
+    topScore: 0,
+    totalQuestions: 0,
+    loading: true
+  });
+  const [participants, setParticipants] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [openDialog, setOpenDialog] = useState(false);
+  const [uploadResult, setUploadResult] = useState(null);
+  const [error, setError] = useState('');
+  const [questionsByEvent, setQuestionsByEvent] = useState([]);
+  const [openManualQuestionDialog, setOpenManualQuestionDialog] = useState(false);
+  const [manualQuestionForm, setManualQuestionForm] = useState({
+    event: '',
+    question_text: '',
+    option1: '',
+    option2: '',
+    option3: '',
+    option4: '',
+    correct_option: 0,
+    difficulty: 'medium',
+    category: '',
+    points: 10,
+    time_limit: 30,
+    explanation: ''
+  });
+  const [submittingQuestion, setSubmittingQuestion] = useState(false);
+
+  useEffect(() => {
+    // Check authentication
+    const isAuthenticated = sessionStorage.getItem('adminAuthenticated');
+    if (!isAuthenticated) {
+      navigate('/admin/login');
+      return;
+    }
+    
+    loadAllData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [navigate]);
+
+  const loadAllData = async () => {
+    setLoading(true);
+    try {
+      await Promise.all([
+        loadStats(),
+        loadParticipants(),
+        loadQuestions()
+      ]);
+    } catch (error) {
+      console.error('Failed to load data:', error);
+      setError('Failed to load data from server. Please check if backend is running.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadStats = async () => {
+    try {
+      const response = await axios.get(`${API_URL}/admin/dashboard-stats`);
+      if (response.data.success) {
+        setStats({
+          ...response.data.data,
+          loading: false
+        });
+        setQuestionsByEvent(response.data.data.questionsByEvent || []);
+      }
+    } catch (error) {
+      console.error('Failed to load stats:', error);
+      setStats(prev => ({ ...prev, loading: false }));
+    }
+  };
+
+  const loadParticipants = async () => {
+    try {
+      const response = await axios.get(`${API_URL}/admin/participants`, {
+        params: { 
+          event: selectedEvent === 'All' ? null : selectedEvent,
+          page: 1,
+          limit: 100
+        }
+      });
+      if (response.data.success) {
+        setParticipants(response.data.data || []);
+      }
+    } catch (error) {
+      console.error('Failed to load participants:', error);
+      setParticipants([]);
+    }
+  };
+
+  const loadQuestions = async () => {
+    try {
+      const response = await axios.get(`${API_URL}/admin/questions`, {
+        params: { limit: 50 }
+      });
+      // Questions loaded for verification but not stored in state
+      if (!response.data.success) {
+        console.error('Failed to load questions');
+      }
+    } catch (error) {
+      console.error('Failed to load questions:', error);
+    }
+  };
+
+  const handleFileUpload = async (e) => {
+    e.preventDefault();
+    if (!csvFile) {
+      setError('Please select a CSV file');
+      return;
+    }
+
+    setUploading(true);
+    setError('');
+    
+    const formData = new FormData();
+    formData.append('csvFile', csvFile);
+    formData.append('event', selectedEvent === 'All' ? 'InnovWEB' : selectedEvent);
+
+    try {
+      const response = await axios.post(`${API_URL}/admin/upload-questions`, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+      });
+      
+      setUploadResult(response.data);
+      setOpenDialog(true);
+      setCsvFile(null);
+      
+      // Refresh data
+      await loadQuestions();
+      await loadStats();
+    } catch (error) {
+      console.error('Upload failed:', error);
+      setError(error.response?.data?.message || 'Failed to upload questions. Check CSV format.');
+      setUploadResult({ 
+        success: false, 
+        message: error.response?.data?.message || 'Upload failed' 
+      });
+      setOpenDialog(true);
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const handleEventChange = (event) => {
+    setSelectedEvent(event.target.value);
+    // Reload participants for selected event
+    setTimeout(() => loadParticipants(), 100);
+  };
+
+  const handleLogout = () => {
+    sessionStorage.removeItem('adminAuthenticated');
+    sessionStorage.removeItem('adminUser');
+    sessionStorage.removeItem('adminLoginTime');
+    navigate('/admin/login');
+  };
+
+  const handleRefresh = () => {
+    loadAllData();
+  };
+
+  const handleExportCSV = () => {
+    if (participants.length === 0) {
+      setError('No participants to export');
+      return;
+    }
+
+    try {
+      // Create CSV content
+      const headers = [
+        'Team Code',
+        'Team Name',
+        'Event',
+        'Team Lead',
+        'College',
+        'Email',
+        'Phone',
+        'Quiz Score',
+        'Quiz Taken',
+        'Registration Date'
+      ];
+
+      const rows = participants.map(p => [
+        p.team_code || '',
+        `"${p.team_name || ''}"`,
+        p.event || '',
+        `"${p.team_lead_name || ''}"`,
+        `"${p.college_name || ''}"`,
+        p.email || '',
+        p.phone_number || '',
+        p.quiz_score || 'Not taken',
+        p.quiz_taken ? 'Yes' : 'No',
+        p.registration_date ? new Date(p.registration_date).toLocaleDateString() : ''
+      ]);
+
+      const csvContent = [headers.join(','), ...rows.map(row => row.join(','))].join('\n');
+
+      // Create download link
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `quiz_results_${selectedEvent}_${Date.now()}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error('Export error:', err);
+      setError('Failed to export CSV');
+    }
+  };
+
+  const handleViewParticipant = (participant) => {
+    // Implement view participant details
+    console.log('View participant:', participant);
+    alert(`View details for ${participant.team_name}`);
+  };
+
+  const handleManualQuestionChange = (field, value) => {
+    setManualQuestionForm(prev => ({
+      ...prev,
+      [field]: value
+    }));
+  };
+
+  const handleSubmitManualQuestion = async () => {
+    // Validation
+    if (!manualQuestionForm.event) {
+      setError('Please select an event');
+      return;
+    }
+    if (!manualQuestionForm.question_text.trim()) {
+      setError('Please enter the question');
+      return;
+    }
+    if (!manualQuestionForm.option1.trim() || !manualQuestionForm.option2.trim() || 
+        !manualQuestionForm.option3.trim() || !manualQuestionForm.option4.trim()) {
+      setError('Please enter all 4 options');
+      return;
+    }
+
+    setSubmittingQuestion(true);
+    setError('');
+
+    try {
+      const response = await axios.post(`${API_URL}/admin/add-question`, {
+        event: manualQuestionForm.event,
+        question_text: manualQuestionForm.question_text.trim(),
+        options: [
+          manualQuestionForm.option1.trim(),
+          manualQuestionForm.option2.trim(),
+          manualQuestionForm.option3.trim(),
+          manualQuestionForm.option4.trim()
+        ],
+        correct_option: parseInt(manualQuestionForm.correct_option),
+        difficulty: manualQuestionForm.difficulty,
+        category: manualQuestionForm.category,
+        points: parseInt(manualQuestionForm.points),
+        time_limit: parseInt(manualQuestionForm.time_limit),
+        explanation: manualQuestionForm.explanation
+      });
+
+      if (response.data.success) {
+        setOpenManualQuestionDialog(false);
+        setManualQuestionForm({
+          event: '',
+          question_text: '',
+          option1: '',
+          option2: '',
+          option3: '',
+          option4: '',
+          correct_option: 0,
+          difficulty: 'medium',
+          category: '',
+          points: 10,
+          time_limit: 30,
+          explanation: ''
+        });
+        setUploadResult(response.data);
+        setOpenDialog(true);
+        await loadQuestions();
+        await loadStats();
+      }
+    } catch (error) {
+      console.error('Failed to add question:', error);
+      setError(error.response?.data?.message || 'Failed to add question');
+    } finally {
+      setSubmittingQuestion(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <Container sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
+        <CircularProgress />
+        <Typography sx={{ ml: 2 }}>Loading Dashboard...</Typography>
+      </Container>
+    );
+  }
+
+  return (
+    <Container maxWidth="xl" sx={{ py: 4 }}>
+      {error && (
+        <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError('')}>
+          {error}
+        </Alert>
+      )}
+
+      {/* Header */}
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 4 }}>
+        <Typography variant="h4" fontWeight="bold" color="primary">
+          Quiz Administration Dashboard
+        </Typography>
+        <Box sx={{ display: 'flex', gap: 2 }}>
+          <Button 
+            variant="contained"
+            startIcon={<BarChart />}
+            onClick={() => navigate('/admin/results')}
+            sx={{ background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)' }}
+          >
+            View Results
+          </Button>
+          <Button 
+            variant="outlined" 
+            startIcon={<Refresh />}
+            onClick={handleRefresh}
+            disabled={loading}
+          >
+            Refresh
+          </Button>
+          <Button 
+            variant="outlined" 
+            startIcon={<Download />}
+            onClick={handleExportCSV}
+            disabled={participants.length === 0}
+          >
+            Export CSV
+          </Button>
+          <Button variant="outlined" color="error" onClick={handleLogout}>
+            Logout
+          </Button>
+        </Box>
+      </Box>
+
+      {/* Stats Cards */}
+      <Grid container spacing={3} sx={{ mb: 4 }}>
+        <Grid item xs={12} sm={6} md={3}>
+          <Card sx={{ height: '100%' }}>
+            <CardContent>
+              <People sx={{ fontSize: 40, color: 'primary.main', mb: 2 }} />
+              <Typography variant="h5">{stats.totalParticipants}</Typography>
+              <Typography color="textSecondary">Total Registrations</Typography>
+              <Typography variant="caption" color="textSecondary">
+                Across all events
+              </Typography>
+            </CardContent>
+          </Card>
+        </Grid>
+        <Grid item xs={12} sm={6} md={3}>
+          <Card sx={{ height: '100%' }}>
+            <CardContent>
+              <Quiz sx={{ fontSize: 40, color: stats.quizTaken > 0 ? 'success.main' : 'text.disabled', mb: 2 }} />
+              <Typography variant="h5">{stats.quizTaken}</Typography>
+              <Typography color="textSecondary">Quiz Attempted</Typography>
+              <Typography variant="caption" color="textSecondary">
+                {stats.totalParticipants > 0 ? 
+                  `${Math.round((stats.quizTaken / stats.totalParticipants) * 100)}% completion` : 
+                  'No participants'}
+              </Typography>
+            </CardContent>
+          </Card>
+        </Grid>
+        <Grid item xs={12} sm={6} md={3}>
+          <Card sx={{ height: '100%' }}>
+            <CardContent>
+              <BarChart sx={{ fontSize: 40, color: 'warning.main', mb: 2 }} />
+              <Typography variant="h5">{stats.averageScore}%</Typography>
+              <Typography color="textSecondary">Average Score</Typography>
+              <LinearProgress 
+                variant="determinate" 
+                value={stats.averageScore} 
+                sx={{ mt: 1, height: 6, borderRadius: 3 }}
+                color={
+                  stats.averageScore >= 70 ? 'success' :
+                  stats.averageScore >= 50 ? 'warning' : 'error'
+                }
+              />
+            </CardContent>
+          </Card>
+        </Grid>
+        <Grid item xs={12} sm={6} md={3}>
+          <Card sx={{ height: '100%' }}>
+            <CardContent>
+              <Typography variant="h4" color="primary" sx={{ mb: 1 }}>{stats.topScore}%</Typography>
+              <Typography color="textSecondary">Top Score</Typography>
+              <LinearProgress 
+                variant="determinate" 
+                value={stats.topScore} 
+                sx={{ mt: 2, height: 8, borderRadius: 4 }}
+                color="success"
+              />
+            </CardContent>
+          </Card>
+        </Grid>
+      </Grid>
+
+      {/* Event Filter and CSV Upload */}
+      <Grid container spacing={3} sx={{ mb: 4 }}>
+        <Grid item xs={12} md={6}>
+          <Paper elevation={2} sx={{ p: 3, height: '100%' }}>
+            <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center' }}>
+              <FilterList sx={{ mr: 1 }} /> Filter by Event
+            </Typography>
+            <FormControl fullWidth sx={{ mt: 2 }}>
+              <InputLabel>Select Event</InputLabel>
+              <Select
+                value={selectedEvent}
+                onChange={handleEventChange}
+                label="Select Event"
+                size="small"
+              >
+                <MenuItem value="All">All Events</MenuItem>
+                <MenuItem value="InnovWEB">InnovWEB</MenuItem>
+                <MenuItem value="SensorShowDown">SensorShowDown</MenuItem>
+                <MenuItem value="IdeaArena">IdeaArena</MenuItem>
+                <MenuItem value="Error Erase">Error Erase</MenuItem>
+              </Select>
+            </FormControl>
+            <Typography variant="body2" color="textSecondary" sx={{ mt: 2 }}>
+              Showing {participants.length} participants for {selectedEvent === 'All' ? 'all events' : selectedEvent}
+            </Typography>
+          </Paper>
+        </Grid>
+        
+        <Grid item xs={12} md={6}>
+          <Paper elevation={2} sx={{ p: 3, height: '100%' }}>
+            <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center' }}>
+              <Upload sx={{ mr: 1 }} /> Upload Quiz Questions
+            </Typography>
+            
+            <form onSubmit={handleFileUpload}>
+              <Grid container spacing={2} alignItems="center">
+                <Grid item xs={12}>
+                  <Button
+                    variant="outlined"
+                    component="label"
+                    fullWidth
+                    sx={{ mb: 2 }}
+                    disabled={uploading}
+                  >
+                    {csvFile ? csvFile.name : 'Choose CSV File'}
+                    <input
+                      type="file"
+                      hidden
+                      accept=".csv"
+                      onChange={(e) => setCsvFile(e.target.files[0])}
+                    />
+                  </Button>
+                </Grid>
+                <Grid item xs={12}>
+                  <Button
+                    type="submit"
+                    variant="contained"
+                    fullWidth
+                    disabled={!csvFile || uploading}
+                    startIcon={uploading ? <CircularProgress size={20} /> : <Upload />}
+                  >
+                    {uploading ? 'Uploading...' : 'Upload Questions'}
+                  </Button>
+                </Grid>
+              </Grid>
+            </form>
+
+            <Box sx={{ mt: 2, bgcolor: 'grey.50', p: 2, borderRadius: 1 }}>
+              <Typography variant="body2" color="textSecondary" gutterBottom>
+                <strong>CSV Format Required:</strong>
+              </Typography>
+              <Typography variant="caption" color="textSecondary" component="div">
+                question,option1,option2,option3,option4,correct_option,explanation,difficulty,category,points,time_limit
+              </Typography>
+              <Typography variant="caption" color="textSecondary" component="div">
+                <strong>Note:</strong> correct_option should be 1-4 (1=first option)
+              </Typography>
+            </Box>
+          </Paper>
+        </Grid>
+
+        <Grid item xs={12} md={6}>
+          <Paper elevation={2} sx={{ p: 3, height: '100%' }}>
+            <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center' }}>
+              <Quiz sx={{ mr: 1 }} /> Add Question Manually
+            </Typography>
+            
+            <Typography variant="body2" color="textSecondary" sx={{ mb: 3 }}>
+              Manually add quiz questions for each event without using CSV
+            </Typography>
+
+            <Button
+              variant="contained"
+              color="primary"
+              fullWidth
+              onClick={() => setOpenManualQuestionDialog(true)}
+              size="large"
+            >
+              + Add New Question
+            </Button>
+
+            <Box sx={{ mt: 2, bgcolor: 'blue.50', p: 2, borderRadius: 1 }}>
+              <Typography variant="body2" color="textSecondary" gutterBottom>
+                <strong>Features:</strong>
+              </Typography>
+              <Typography variant="caption" color="textSecondary" component="div">
+                ✓ Select event, difficulty level, and category
+              </Typography>
+              <Typography variant="caption" color="textSecondary" component="div">
+                ✓ Add 4 options and mark the correct answer
+              </Typography>
+              <Typography variant="caption" color="textSecondary" component="div">
+                ✓ Set points and time limit per question
+              </Typography>
+            </Box>
+          </Paper>
+        </Grid>
+      </Grid>
+
+      {/* Participants Table */}
+      <Paper elevation={2} sx={{ p: 3, mb: 4 }}>
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
+          <Typography variant="h6" fontWeight="bold">
+            Participants & Scores ({participants.length})
+          </Typography>
+          <Chip 
+            label={`${selectedEvent === 'All' ? 'All Events' : selectedEvent}`} 
+            color="primary" 
+            variant="outlined"
+            size="small"
+          />
+        </Box>
+        
+        {participants.length === 0 ? (
+          <Alert severity="info">
+            No participants found for the selected event. Try selecting "All Events".
+          </Alert>
+        ) : (
+          <TableContainer sx={{ maxHeight: 500 }}>
+            <Table stickyHeader size="small">
+              <TableHead>
+                <TableRow>
+                  <TableCell><strong>Team Code</strong></TableCell>
+                  <TableCell><strong>Team Name</strong></TableCell>
+                  <TableCell><strong>Event</strong></TableCell>
+                  <TableCell><strong>Team Lead</strong></TableCell>
+                  <TableCell><strong>College</strong></TableCell>
+                  <TableCell><strong>Quiz Score</strong></TableCell>
+                  <TableCell><strong>Status</strong></TableCell>
+                  <TableCell><strong>Actions</strong></TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {participants.map((participant, index) => (
+                  <TableRow 
+                    key={participant._id || index}
+                    sx={{ 
+                      '&:hover': { 
+                        backgroundColor: 'action.hover' 
+                      } 
+                    }}
+                  >
+                    <TableCell>
+                      <Typography variant="body2" fontFamily="monospace" fontWeight="medium">
+                        {participant.team_code}
+                      </Typography>
+                    </TableCell>
+                    <TableCell>
+                      <Typography variant="body2" fontWeight="medium">
+                        {participant.team_name}
+                      </Typography>
+                    </TableCell>
+                    <TableCell>
+                      <Chip 
+                        label={participant.event} 
+                        size="small" 
+                        color={
+                          participant.event === 'InnovWEB' ? 'primary' :
+                          participant.event === 'SensorShowDown' ? 'secondary' :
+                          participant.event === 'IdeaArena' ? 'success' : 'warning'
+                        }
+                        variant="outlined"
+                      />
+                    </TableCell>
+                    <TableCell>{participant.team_lead_name}</TableCell>
+                    <TableCell>{participant.college_name}</TableCell>
+                    <TableCell>
+                      <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                        {participant.quiz_score !== undefined && participant.quiz_score !== null ? (
+                          <>
+                            <LinearProgress 
+                              variant="determinate" 
+                              value={participant.quiz_score} 
+                              sx={{ width: 80, mr: 2, height: 6, borderRadius: 3 }}
+                              color={
+                                participant.quiz_score >= 80 ? 'success' :
+                                participant.quiz_score >= 60 ? 'warning' : 'error'
+                              }
+                            />
+                            <Typography variant="body2" fontWeight="medium">
+                              {participant.quiz_score}%
+                            </Typography>
+                          </>
+                        ) : (
+                          <Typography color="textSecondary" variant="body2">
+                            Not taken
+                          </Typography>
+                        )}
+                      </Box>
+                    </TableCell>
+                    <TableCell>
+                      {participant.quiz_taken ? (
+                        <Chip 
+                          label="Completed" 
+                          color="success" 
+                          size="small" 
+                          variant="filled"
+                          sx={{ fontWeight: 'medium' }}
+                        />
+                      ) : (
+                        <Chip 
+                          label="Pending" 
+                          color="warning" 
+                          size="small" 
+                          variant="filled"
+                          sx={{ fontWeight: 'medium' }}
+                        />
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      <Button 
+                        size="small" 
+                        variant="text"
+                        color="primary"
+                        onClick={() => handleViewParticipant(participant)}
+                        sx={{ textTransform: 'none' }}
+                      >
+                        Details
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </TableContainer>
+        )}
+      </Paper>
+
+      {/* Questions Summary */}
+      <Paper elevation={2} sx={{ p: 3 }}>
+        <Typography variant="h6" fontWeight="bold" gutterBottom>
+          Quiz Questions Summary
+        </Typography>
+        <Grid container spacing={2}>
+          <Grid item xs={12} md={4}>
+            <Card variant="outlined" sx={{ height: '100%' }}>
+              <CardContent>
+                <Typography variant="h6">Total Questions</Typography>
+                <Typography variant="h3" color="primary" fontWeight="bold">
+                  {stats.totalQuestions}
+                </Typography>
+                <Typography variant="caption" color="textSecondary">
+                  Across all events
+                </Typography>
+              </CardContent>
+            </Card>
+          </Grid>
+          <Grid item xs={12} md={8}>
+            <Typography variant="subtitle2" color="textSecondary" gutterBottom>
+              Questions by Event:
+            </Typography>
+            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mt: 1 }}>
+              {questionsByEvent.map((eventData, index) => (
+                <Chip 
+                  key={index}
+                  label={`${eventData._id || 'Unknown'}: ${eventData.count}`}
+                  variant="outlined"
+                  size="medium"
+                  color={
+                    eventData._id === 'InnovWEB' ? 'primary' :
+                    eventData._id === 'SensorShowDown' ? 'secondary' :
+                    eventData._id === 'IdeaArena' ? 'success' : 'warning'
+                  }
+                />
+              ))}
+              {questionsByEvent.length === 0 && (
+                <Typography variant="body2" color="textSecondary">
+                  No questions data available
+                </Typography>
+              )}
+            </Box>
+          </Grid>
+        </Grid>
+      </Paper>
+
+      {/* Upload Result Dialog */}
+      <Dialog open={openDialog} onClose={() => setOpenDialog(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>
+          {uploadResult?.success ? '✅ Upload Successful' : '❌ Upload Failed'}
+        </DialogTitle>
+        <DialogContent>
+          {uploadResult?.success ? (
+            <Alert severity="success" sx={{ mb: 2 }}>
+              {uploadResult.message}
+            </Alert>
+          ) : (
+            <Alert severity="error" sx={{ mb: 2 }}>
+              {uploadResult?.message || 'Upload failed'}
+            </Alert>
+          )}
+          {uploadResult?.data && (
+            <Box sx={{ mt: 2 }}>
+              <Typography variant="subtitle2" gutterBottom>
+                <strong>Upload Details:</strong>
+              </Typography>
+              <Typography variant="body2">
+                • Questions Uploaded: <strong>{uploadResult.data.count}</strong>
+              </Typography>
+              <Typography variant="body2">
+                • Event: <strong>{uploadResult.data.event}</strong>
+              </Typography>
+              {uploadResult.data.sample && (
+                <>
+                  <Typography variant="subtitle2" sx={{ mt: 2, mb: 1 }}>
+                    <strong>Sample Question:</strong>
+                  </Typography>
+                  <Paper variant="outlined" sx={{ p: 1, bgcolor: 'grey.50' }}>
+                    <Typography variant="body2">
+                      {uploadResult.data.sample.question_text?.substring(0, 80)}...
+                    </Typography>
+                  </Paper>
+                </>
+              )}
+            </Box>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setOpenDialog(false)} variant="contained">
+            Close
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Manual Question Dialog */}
+      <Dialog open={openManualQuestionDialog} onClose={() => setOpenManualQuestionDialog(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>Add Quiz Question Manually</DialogTitle>
+        <DialogContent sx={{ mt: 2, maxHeight: '80vh', overflow: 'auto' }}>
+          <Grid container spacing={2}>
+            {/* Event Selection */}
+            <Grid item xs={12}>
+              <FormControl fullWidth>
+                <InputLabel>Select Event *</InputLabel>
+                <Select
+                  value={manualQuestionForm.event}
+                  onChange={(e) => handleManualQuestionChange('event', e.target.value)}
+                  label="Select Event"
+                >
+                  <MenuItem value="InnovWEB">InnovWEB</MenuItem>
+                  <MenuItem value="SensorShowDown">SensorShowDown</MenuItem>
+                  <MenuItem value="IdeaArena">IdeaArena</MenuItem>
+                  <MenuItem value="Error Erase">Error Erase</MenuItem>
+                </Select>
+              </FormControl>
+            </Grid>
+
+            {/* Question Text */}
+            <Grid item xs={12}>
+              <TextField
+                fullWidth
+                label="Question Text *"
+                multiline
+                rows={3}
+                value={manualQuestionForm.question_text}
+                onChange={(e) => handleManualQuestionChange('question_text', e.target.value)}
+                placeholder="Enter the quiz question"
+              />
+            </Grid>
+
+            {/* Options */}
+            <Grid item xs={12}>
+              <TextField
+                fullWidth
+                label="Option 1 *"
+                value={manualQuestionForm.option1}
+                onChange={(e) => handleManualQuestionChange('option1', e.target.value)}
+                size="small"
+              />
+            </Grid>
+            <Grid item xs={12}>
+              <TextField
+                fullWidth
+                label="Option 2 *"
+                value={manualQuestionForm.option2}
+                onChange={(e) => handleManualQuestionChange('option2', e.target.value)}
+                size="small"
+              />
+            </Grid>
+            <Grid item xs={12}>
+              <TextField
+                fullWidth
+                label="Option 3 *"
+                value={manualQuestionForm.option3}
+                onChange={(e) => handleManualQuestionChange('option3', e.target.value)}
+                size="small"
+              />
+            </Grid>
+            <Grid item xs={12}>
+              <TextField
+                fullWidth
+                label="Option 4 *"
+                value={manualQuestionForm.option4}
+                onChange={(e) => handleManualQuestionChange('option4', e.target.value)}
+                size="small"
+              />
+            </Grid>
+
+            {/* Correct Option Selection */}
+            <Grid item xs={12}>
+              <Typography variant="subtitle2" gutterBottom fontWeight="bold">
+                Select Correct Option *
+              </Typography>
+              <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+                {['Option 1', 'Option 2', 'Option 3', 'Option 4'].map((opt, idx) => (
+                  <Button
+                    key={idx}
+                    variant={manualQuestionForm.correct_option === idx ? 'contained' : 'outlined'}
+                    color={manualQuestionForm.correct_option === idx ? 'success' : 'inherit'}
+                    size="small"
+                    onClick={() => handleManualQuestionChange('correct_option', idx)}
+                    fullWidth
+                  >
+                    {opt}
+                  </Button>
+                ))}
+              </Box>
+            </Grid>
+
+            {/* Difficulty */}
+            <Grid item xs={12} md={6}>
+              <FormControl fullWidth>
+                <InputLabel>Difficulty</InputLabel>
+                <Select
+                  value={manualQuestionForm.difficulty}
+                  onChange={(e) => handleManualQuestionChange('difficulty', e.target.value)}
+                  label="Difficulty"
+                >
+                  <MenuItem value="easy">Easy</MenuItem>
+                  <MenuItem value="medium">Medium</MenuItem>
+                  <MenuItem value="hard">Hard</MenuItem>
+                </Select>
+              </FormControl>
+            </Grid>
+
+            {/* Category */}
+            <Grid item xs={12} md={6}>
+              <TextField
+                fullWidth
+                label="Category"
+                value={manualQuestionForm.category}
+                onChange={(e) => handleManualQuestionChange('category', e.target.value)}
+                size="small"
+                placeholder="e.g., Web Development"
+              />
+            </Grid>
+
+            {/* Points */}
+            <Grid item xs={12} md={6}>
+              <TextField
+                fullWidth
+                type="number"
+                label="Points"
+                value={manualQuestionForm.points}
+                onChange={(e) => handleManualQuestionChange('points', e.target.value)}
+                size="small"
+                inputProps={{ min: 1, max: 100 }}
+              />
+            </Grid>
+
+            {/* Time Limit */}
+            <Grid item xs={12} md={6}>
+              <TextField
+                fullWidth
+                type="number"
+                label="Time Limit (seconds)"
+                value={manualQuestionForm.time_limit}
+                onChange={(e) => handleManualQuestionChange('time_limit', e.target.value)}
+                size="small"
+                inputProps={{ min: 10, max: 300 }}
+              />
+            </Grid>
+
+            {/* Explanation */}
+            <Grid item xs={12}>
+              <TextField
+                fullWidth
+                label="Explanation (Optional)"
+                multiline
+                rows={2}
+                value={manualQuestionForm.explanation}
+                onChange={(e) => handleManualQuestionChange('explanation', e.target.value)}
+                placeholder="Why is this the correct answer?"
+              />
+            </Grid>
+
+            <Grid item xs={12}>
+              <Alert severity="info">
+                <strong>Note:</strong> All scores will be normalized to 100 points regardless of individual question points.
+              </Alert>
+            </Grid>
+          </Grid>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setOpenManualQuestionDialog(false)}>Cancel</Button>
+          <Button
+            variant="contained"
+            onClick={handleSubmitManualQuestion}
+            disabled={submittingQuestion}
+            startIcon={submittingQuestion ? <CircularProgress size={20} /> : <Quiz />}
+          >
+            {submittingQuestion ? 'Adding...' : 'Add Question'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+    </Container>
+  );
+}
+
+export default AdminDashboard;

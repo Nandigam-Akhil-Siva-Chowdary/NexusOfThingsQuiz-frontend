@@ -131,7 +131,7 @@ function QuizPage() {
       time_spent: 30
     }));
 
-    await axios.post(`${API_URL}/api/quiz/submit`, {
+    await axios.post(`${API_URL}/quiz/submit`, {
       session_id: sessionId,
       answers
     });

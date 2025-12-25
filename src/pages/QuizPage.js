@@ -89,7 +89,7 @@ function QuizPage() {
         throw new Error('Missing participant info');
       }
 
-      const res = await axios.post(`${API_URL}/api/quiz/start`, {
+      const res = await axios.post(`${API_URL}/quiz/start`, {
         email: email.toLowerCase().trim(),
         event: participantInfo.event
       });
